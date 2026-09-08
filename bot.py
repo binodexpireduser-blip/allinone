@@ -1,4 +1,5 @@
 import irc.bot
+import irc.connection
 import ssl
 import time
 import requests
@@ -7,36 +8,39 @@ import storage
 
 class AllinOneBot(irc.bot.SingleServerIRCBot):
     def __init__(self, nickname, server, port):
-        print(f"[*] Initializing bot: {nickname} on {server}:{port}...")
+        print(f"[*] Initializing AllinOne on {server}:{port}...")
         
-        # FIX: Create a more relaxed SSL context for IRC servers
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE  # This ignores SSL certificate errors
-        
-        factory = irc.connection.Factory(wrapper=ssl_context.wrap_socket)
-        
+        # --- SMART CONNECTION LOGIC ---
+        if port == 6697:
+            print("[*] Using SSL connection for port 6697")
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            factory = irc.connection.Factory(wrapper=ssl_context.wrap_socket)
+        else:
+            print("[*] Using PLAIN connection for port 6667")
+            factory = irc.connection.Factory() # Standard non-SSL factory
+
         super().__init__([(server, port)], nickname, nickname, connect_factory=factory)
+        
         self.admin = "antonio"
         self.cooldowns = {}
         self.cd_time = 8
 
-    def on_connect(self, c, e):
-        print(f"[DEBUG] Socket connected to server!")
-
     def on_welcome(self, c, e):
-        print(f"[DEBUG] Welcome message received from server. Joining channels...")
+        print(f"[SUCCESS] Connected to {e.source}. Joining channels...")
         config = storage.get_config()
-        # Ensure we join the primary channel requested
+        
+        # Ensure #chatwithworld is always there
         if "#chatwithworld" not in config["default_channels"]:
             config["default_channels"].append("#chatwithworld")
             
         for channel in config["default_channels"]:
+            print(f"[*] Attempting to join {channel}...")
             c.join(channel)
-            print(f"[+] AllinOne joined {channel}")
 
     def on_join(self, c, e):
-        print(f"[DEBUG] Successfully joined: {e.target}")
+        print(f"[+] Successfully joined channel: {e.target}")
 
     def check_cd(self, cmd):
         now = time.time()
@@ -55,7 +59,7 @@ class AllinOneBot(irc.bot.SingleServerIRCBot):
         if not parts: return
         cmd = parts[0].lower()
 
-        # Admin Control
+        # --- ADMIN COMMANDS ---
         if author.lower() == self.admin:
             if cmd == "!callbot" and len(parts) > 1:
                 c.join(parts[1])
@@ -74,16 +78,18 @@ class AllinOneBot(irc.bot.SingleServerIRCBot):
                     c.privmsg(target, f"➕ {chan} added to auto-join.")
                 storage.save_config(cfg)
 
-        # Main Commands
+        # --- PUBLIC COMMANDS ---
         if cmd == "!aiocmd":
-            c.privmsg(target, "🛠️ **Commands:** !gtime, !topnews, !wiki, !weather, !btc, !eth, !quote, !advice, !catfact, !iss, !today, !isup, !math, !number, !urban, !affirm, !excuse, !zen, !stoic, !bored, !gender, !element, !verse, !rhyme, !cocktail, !poke, !dict, !space, !brewery, !sun, !kanye, !fruit, !holiday, !pass 📜")
+            c.privmsg(target, "🛠️ **Commands:** !gtime, !topnews, !wiki, !weather, !btc, !eth, !quote, !advice, !catfact, !dogfact, !iss, !today, !isup, !math, !number, !urban, !affirm, !excuse, !zen, !stoic, !bored, !gender, !element, !verse, !rhyme, !cocktail, !poke, !dict, !space, !brewery, !sun, !kanye, !fruit, !holiday, !pass 📜")
 
         elif cmd == "!gtime":
             ok, sec = self.check_cd("gtime")
-            if not ok: return c.privmsg(target, f"⏳ {author}, wait {sec}s...")
+            if not ok: return c.privmsg(target, f"⏳ {author}, wait {sec}s... ✋")
             loc = parts[1] if len(parts) > 1 else "London"
-            res = requests.get(f"https://wttr.in/{urllib.parse.quote(loc)}?format=%T+%Z").text.strip()
-            c.privmsg(target, f"🕒 Time in {loc.upper()}: {res} 🌍")
+            try:
+                res = requests.get(f"https://wttr.in/{urllib.parse.quote(loc)}?format=%T+%Z").text.strip()
+                c.privmsg(target, f"🕒 Time in {loc.upper()}: {res} 🌍")
+            except: pass
 
         elif cmd == "!topnews":
             ok, _ = self.check_cd("news")
@@ -106,32 +112,20 @@ class AllinOneBot(irc.bot.SingleServerIRCBot):
                 c.privmsg(target, f"📖 {data.get('extract', 'Not found')[:350]}... 🧐")
             except: pass
 
-        elif cmd == "!weather":
-            ok, _ = self.check_cd("weather")
-            if not ok: return
-            city = parts[1] if len(parts) > 1 else "London"
-            try:
-                geo = requests.get(f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1").json()
-                res = geo['results'][0]
-                w = requests.get(f"https://api.open-meteo.com/v1/forecast?latitude={res['latitude']}&longitude={res['longitude']}&current_weather=true").json()
-                c.privmsg(target, f"🌡️ Weather in {res['name']}: {w['current_weather']['temperature']}°C 🌤️")
-            except: c.privmsg(target, "❌ Weather error.")
-
-        elif cmd in ["!btc", "!eth"]:
+        elif cmd == "!btc" or cmd == "!eth":
             ok, _ = self.check_cd("crypto")
             if not ok: return
             coin = "bitcoin" if "btc" in cmd else "ethereum"
-            data = requests.get(f"https://api.coingecko.com/api/v3/simple/price?ids={coin}&vs_currencies=usd").json()
-            c.privmsg(target, f"💰 {coin.upper()}: ${data[coin]['usd']:,} USD 🚀")
+            try:
+                data = requests.get(f"https://api.coingecko.com/api/v3/simple/price?ids={coin}&vs_currencies=usd").json()
+                c.privmsg(target, f"💰 {coin.upper()}: ${data[coin]['usd']:,} USD 🚀")
+            except: pass
 
     def on_nicknameinuse(self, c, e):
         new_nick = c.get_nickname() + "_"
         print(f"[!] Nickname in use, trying {new_nick}")
         c.nick(new_nick)
 
-    def on_error(self, c, e):
-        print(f"[ERROR] IRC Error: {e.arguments}")
-
     def on_disconnect(self, c, e):
-        print("[!] Bot disconnected from server. Reconnecting in 10s...")
+        print("[!] Disconnected. Reconnecting in 10s...")
         time.sleep(10)
