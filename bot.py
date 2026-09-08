@@ -8,39 +8,48 @@ import storage
 
 class AllinOneBot(irc.bot.SingleServerIRCBot):
     def __init__(self, nickname, server, port):
-        print(f"[*] Initializing AllinOne on {server}:{port}...")
+        print(f"[*] Initializing {nickname} on {server}:{port}...")
         
-        # --- SMART CONNECTION LOGIC ---
+        # Use SSL for 6697, Plain for 6667
         if port == 6697:
-            print("[*] Using SSL connection for port 6697")
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-            factory = irc.connection.Factory(wrapper=ssl_context.wrap_socket)
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            factory = irc.connection.Factory(wrapper=ctx.wrap_socket)
+            print("[*] SSL Context created.")
         else:
-            print("[*] Using PLAIN connection for port 6667")
-            factory = irc.connection.Factory() # Standard non-SSL factory
+            factory = irc.connection.Factory()
 
-        super().__init__([(server, port)], nickname, nickname, connect_factory=factory)
+        # Added 'realname' and increased reconnection frequency
+        super().__init__([(server, port)], nickname, "Antonio AllInOne Bot", connect_factory=factory)
         
         self.admin = "antonio"
         self.cooldowns = {}
         self.cd_time = 8
 
     def on_welcome(self, c, e):
-        print(f"[SUCCESS] Connected to {e.source}. Joining channels...")
+        print(f"[SUCCESS] Welcome received from {e.source}. Joining channels...")
         config = storage.get_config()
-        
-        # Ensure #chatwithworld is always there
         if "#chatwithworld" not in config["default_channels"]:
             config["default_channels"].append("#chatwithworld")
             
         for channel in config["default_channels"]:
-            print(f"[*] Attempting to join {channel}...")
+            print(f"[*] Joining {channel}...")
             c.join(channel)
 
     def on_join(self, c, e):
-        print(f"[+] Successfully joined channel: {e.target}")
+        print(f"[+] Successfully joined: {e.target}")
+
+    def on_nicknameinuse(self, c, e):
+        new_nick = c.get_nickname() + "_"
+        print(f"[!] Nickname taken, trying {new_nick}")
+        c.nick(new_nick)
+
+    # This helps us see what is happening if it hangs
+    def on_all_raw_messages(self, c, e):
+        # Only print server notices/errors to keep logs clean
+        if e.type in ["notice", "error", "433", "422"]:
+            print(f"[SERVER] {e.type}: {e.arguments}")
 
     def check_cd(self, cmd):
         now = time.time()
@@ -59,37 +68,28 @@ class AllinOneBot(irc.bot.SingleServerIRCBot):
         if not parts: return
         cmd = parts[0].lower()
 
-        # --- ADMIN COMMANDS ---
         if author.lower() == self.admin:
             if cmd == "!callbot" and len(parts) > 1:
                 c.join(parts[1])
-                c.privmsg(target, f"🚀 Joining {parts[1]} for you, Antonio!")
             elif cmd == "!rembot" and len(parts) > 1:
                 c.part(parts[1])
-                c.privmsg(target, f"👋 Left {parts[1]}.")
             elif cmd == "!djchan" and len(parts) > 1:
                 chan = parts[1].lower()
                 cfg = storage.get_config()
-                if chan in cfg["default_channels"]:
-                    cfg["default_channels"].remove(chan)
-                    c.privmsg(target, f"➖ {chan} removed from auto-join.")
-                else:
-                    cfg["default_channels"].append(chan)
-                    c.privmsg(target, f"➕ {chan} added to auto-join.")
+                if chan in cfg["default_channels"]: cfg["default_channels"].remove(chan)
+                else: cfg["default_channels"].append(chan)
                 storage.save_config(cfg)
+                c.privmsg(target, f"⚙️ Default channels updated.")
 
-        # --- PUBLIC COMMANDS ---
         if cmd == "!aiocmd":
-            c.privmsg(target, "🛠️ **Commands:** !gtime, !topnews, !wiki, !weather, !btc, !eth, !quote, !advice, !catfact, !dogfact, !iss, !today, !isup, !math, !number, !urban, !affirm, !excuse, !zen, !stoic, !bored, !gender, !element, !verse, !rhyme, !cocktail, !poke, !dict, !space, !brewery, !sun, !kanye, !fruit, !holiday, !pass 📜")
+            c.privmsg(target, "🛠️ !gtime, !topnews, !wiki, !weather, !btc, !eth, !quote, !advice, !catfact, !iss, !math, !urban 📜")
 
         elif cmd == "!gtime":
             ok, sec = self.check_cd("gtime")
-            if not ok: return c.privmsg(target, f"⏳ {author}, wait {sec}s... ✋")
+            if not ok: return c.privmsg(target, f"⏳ {author}, wait {sec}s...")
             loc = parts[1] if len(parts) > 1 else "London"
-            try:
-                res = requests.get(f"https://wttr.in/{urllib.parse.quote(loc)}?format=%T+%Z").text.strip()
-                c.privmsg(target, f"🕒 Time in {loc.upper()}: {res} 🌍")
-            except: pass
+            res = requests.get(f"https://wttr.in/{urllib.parse.quote(loc)}?format=%T+%Z").text.strip()
+            c.privmsg(target, f"🕒 Time in {loc.upper()}: {res} 🌍")
 
         elif cmd == "!topnews":
             ok, _ = self.check_cd("news")
@@ -100,32 +100,12 @@ class AllinOneBot(irc.bot.SingleServerIRCBot):
             try:
                 data = requests.get(url).json()
                 item = data['items'][0]
-                c.privmsg(target, f"📰 [News {cc.upper()}] {item['title']} 🔗 {item['link'].split('&url=')[-1]} 🗞️")
-            except: c.privmsg(target, "❌ News error.")
+                c.privmsg(target, f"📰 {item['title']} 🔗 {item['link'].split('&url=')[-1]}")
+            except: pass
 
         elif cmd == "!wiki":
             ok, _ = self.check_cd("wiki")
             if not ok: return
             topic = " ".join(parts[1:]) if len(parts) > 1 else "Internet"
-            try:
-                data = requests.get(f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(topic)}").json()
-                c.privmsg(target, f"📖 {data.get('extract', 'Not found')[:350]}... 🧐")
-            except: pass
-
-        elif cmd == "!btc" or cmd == "!eth":
-            ok, _ = self.check_cd("crypto")
-            if not ok: return
-            coin = "bitcoin" if "btc" in cmd else "ethereum"
-            try:
-                data = requests.get(f"https://api.coingecko.com/api/v3/simple/price?ids={coin}&vs_currencies=usd").json()
-                c.privmsg(target, f"💰 {coin.upper()}: ${data[coin]['usd']:,} USD 🚀")
-            except: pass
-
-    def on_nicknameinuse(self, c, e):
-        new_nick = c.get_nickname() + "_"
-        print(f"[!] Nickname in use, trying {new_nick}")
-        c.nick(new_nick)
-
-    def on_disconnect(self, c, e):
-        print("[!] Disconnected. Reconnecting in 10s...")
-        time.sleep(10)
+            data = requests.get(f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(topic)}").json()
+            c.privmsg(target, f"📖 {data.get('extract', '...')[:300]}")
