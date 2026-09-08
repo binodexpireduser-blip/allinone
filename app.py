@@ -13,7 +13,7 @@ def home():
 def run_irc():
     # IRC config
     IRC_SERVER = "irc.hybridirc.com"
-    IRC_PORT = 6697
+    IRC_PORT = 6667
     IRC_NICK = "AllinOne"
     
     print("[*] Thread starting: IRC Bot")
