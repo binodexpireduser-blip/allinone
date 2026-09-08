@@ -7,8 +7,13 @@ import storage
 
 class AllinOneBot(irc.bot.SingleServerIRCBot):
     def __init__(self, nickname, server, port):
-        # Setup SSL for port 6697
+        print(f"[*] Initializing bot: {nickname} on {server}:{port}...")
+        
+        # FIX: Create a more relaxed SSL context for IRC servers
         ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE  # This ignores SSL certificate errors
+        
         factory = irc.connection.Factory(wrapper=ssl_context.wrap_socket)
         
         super().__init__([(server, port)], nickname, nickname, connect_factory=factory)
@@ -16,11 +21,22 @@ class AllinOneBot(irc.bot.SingleServerIRCBot):
         self.cooldowns = {}
         self.cd_time = 8
 
+    def on_connect(self, c, e):
+        print(f"[DEBUG] Socket connected to server!")
+
     def on_welcome(self, c, e):
+        print(f"[DEBUG] Welcome message received from server. Joining channels...")
         config = storage.get_config()
+        # Ensure we join the primary channel requested
+        if "#chatwithworld" not in config["default_channels"]:
+            config["default_channels"].append("#chatwithworld")
+            
         for channel in config["default_channels"]:
             c.join(channel)
             print(f"[+] AllinOne joined {channel}")
+
+    def on_join(self, c, e):
+        print(f"[DEBUG] Successfully joined: {e.target}")
 
     def check_cd(self, cmd):
         now = time.time()
@@ -39,32 +55,32 @@ class AllinOneBot(irc.bot.SingleServerIRCBot):
         if not parts: return
         cmd = parts[0].lower()
 
-        # --- ADMIN COMMANDS (Antonio Only) ---
+        # Admin Control
         if author.lower() == self.admin:
             if cmd == "!callbot" and len(parts) > 1:
                 c.join(parts[1])
                 c.privmsg(target, f"🚀 Joining {parts[1]} for you, Antonio!")
             elif cmd == "!rembot" and len(parts) > 1:
                 c.part(parts[1])
-                c.privmsg(target, f"👋 Left {parts[1]} as requested.")
+                c.privmsg(target, f"👋 Left {parts[1]}.")
             elif cmd == "!djchan" and len(parts) > 1:
-                chan = parts[1]
+                chan = parts[1].lower()
                 cfg = storage.get_config()
                 if chan in cfg["default_channels"]:
                     cfg["default_channels"].remove(chan)
-                    c.privmsg(target, f"➖ {chan} removed from auto-join list.")
+                    c.privmsg(target, f"➖ {chan} removed from auto-join.")
                 else:
                     cfg["default_channels"].append(chan)
-                    c.privmsg(target, f"➕ {chan} added to auto-join list.")
+                    c.privmsg(target, f"➕ {chan} added to auto-join.")
                 storage.save_config(cfg)
 
-        # --- PUBLIC COMMANDS ---
+        # Main Commands
         if cmd == "!aiocmd":
-            c.privmsg(target, "🛠️ **Commands:** !gtime, !topnews, !wiki, !weather, !btc, !eth, !quote, !advice, !catfact, !dogfact, !iss, !today, !isup, !math, !number, !urban, !affirm, !excuse, !zen, !stoic, !bored, !gender, !element, !verse, !rhyme, !cocktail, !poke, !dict, !space, !brewery, !sun, !kanye, !fruit, !holiday, !pass 📜")
+            c.privmsg(target, "🛠️ **Commands:** !gtime, !topnews, !wiki, !weather, !btc, !eth, !quote, !advice, !catfact, !iss, !today, !isup, !math, !number, !urban, !affirm, !excuse, !zen, !stoic, !bored, !gender, !element, !verse, !rhyme, !cocktail, !poke, !dict, !space, !brewery, !sun, !kanye, !fruit, !holiday, !pass 📜")
 
         elif cmd == "!gtime":
             ok, sec = self.check_cd("gtime")
-            if not ok: return c.privmsg(target, f"⏳ {author}, wait {sec}s... ✋")
+            if not ok: return c.privmsg(target, f"⏳ {author}, wait {sec}s...")
             loc = parts[1] if len(parts) > 1 else "London"
             res = requests.get(f"https://wttr.in/{urllib.parse.quote(loc)}?format=%T+%Z").text.strip()
             c.privmsg(target, f"🕒 Time in {loc.upper()}: {res} 🌍")
@@ -85,8 +101,10 @@ class AllinOneBot(irc.bot.SingleServerIRCBot):
             ok, _ = self.check_cd("wiki")
             if not ok: return
             topic = " ".join(parts[1:]) if len(parts) > 1 else "Internet"
-            data = requests.get(f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(topic)}").json()
-            c.privmsg(target, f"📖 {data.get('extract', 'Not found')[:350]}... 🧐")
+            try:
+                data = requests.get(f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(topic)}").json()
+                c.privmsg(target, f"📖 {data.get('extract', 'Not found')[:350]}... 🧐")
+            except: pass
 
         elif cmd == "!weather":
             ok, _ = self.check_cd("weather")
@@ -106,41 +124,14 @@ class AllinOneBot(irc.bot.SingleServerIRCBot):
             data = requests.get(f"https://api.coingecko.com/api/v3/simple/price?ids={coin}&vs_currencies=usd").json()
             c.privmsg(target, f"💰 {coin.upper()}: ${data[coin]['usd']:,} USD 🚀")
 
-        elif cmd == "!quote":
-            if self.check_cd("quote")[0]:
-                q = requests.get("https://api.quotable.io/random", verify=False).json()
-                c.privmsg(target, f"📜 \"{q['content']}\" — {q['author']} ✨")
-
-        elif cmd == "!catfact":
-            if self.check_cd("cat")[0]:
-                f = requests.get("https://catfact.ninja/fact").json()
-                c.privmsg(target, f"🐈 Cat Fact: {f['fact']} 🐾")
-
-        elif cmd == "!dogfact":
-            if self.check_cd("dog")[0]:
-                f = requests.get("https://dog-api.kinduff.com/api/facts").json()
-                c.privmsg(target, f"🐕 Dog Fact: {f['facts'][0]} 🦴")
-
-        elif cmd == "!iss":
-            if self.check_cd("iss")[0]:
-                pos = requests.get("http://api.open-notify.org/iss-now.json").json()['iss_position']
-                c.privmsg(target, f"🛰️ ISS Location: Lat {pos['latitude']}, Lon {pos['longitude']} 🌌")
-
-        elif cmd == "!advice":
-            if self.check_cd("advice")[0]:
-                a = requests.get("https://api.adviceslip.com/advice").json()
-                c.privmsg(target, f"💡 Advice: {a['slip']['advice']} ✅")
-
-        elif cmd == "!kanye":
-            if self.check_cd("kanye")[0]:
-                k = requests.get("https://api.kanye.rest/").json()
-                c.privmsg(target, f"🎤 Kanye: \"{k['quote']}\" 🐻")
-
-        elif cmd == "!math":
-            if self.check_cd("math")[0]:
-                n = parts[1] if len(parts) > 1 else "random"
-                res = requests.get(f"http://numbersapi.com/{n}/math").text
-                c.privmsg(target, f"🧮 Math: {res} 🔢")
-
     def on_nicknameinuse(self, c, e):
-        c.nick(c.get_nickname() + "_")
+        new_nick = c.get_nickname() + "_"
+        print(f"[!] Nickname in use, trying {new_nick}")
+        c.nick(new_nick)
+
+    def on_error(self, c, e):
+        print(f"[ERROR] IRC Error: {e.arguments}")
+
+    def on_disconnect(self, c, e):
+        print("[!] Bot disconnected from server. Reconnecting in 10s...")
+        time.sleep(10)
