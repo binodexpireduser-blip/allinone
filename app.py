@@ -6,33 +6,27 @@ from bot import AllinOneBot
 
 app = Flask(__name__)
 
-# This function starts the bot
 def run_irc():
     IRC_SERVER = "irc.hybridirc.com"
-    IRC_PORT = 6667 # We are using 6667 as discussed
-    IRC_NICK = "AllinOne"
+    IRC_PORT = 6697  # SSL Port is usually safer on cloud hosts
+    IRC_NICK = f"AIO_Ant_Bot_{int(time.time()) % 1000}" # Unique Nickname
     
-    print("[*] IRC Thread is initializing...")
+    print(f"[*] Starting IRC Thread. Nick: {IRC_NICK}")
     while True:
         try:
-            print(f"[*] Attempting to connect to {IRC_SERVER}...")
             bot = AllinOneBot(IRC_NICK, IRC_SERVER, IRC_PORT)
             bot.start()
         except Exception as e:
-            print(f"[ERROR] Bot crashed: {e}")
+            print(f"[CRASH] {e}")
             time.sleep(15)
 
-# --- THE FIX: Start the thread HERE, not in the __main__ block ---
-print("[*] Starting background IRC thread...")
-t = threading.Thread(target=run_irc)
-t.daemon = True
-t.start()
+# Trigger thread
+threading.Thread(target=run_irc, daemon=True).start()
 
 @app.route('/')
 def home():
-    return "AllinOne Bot is active! 🚀 Check #chatwithworld on HybridIRC."
+    return "AllinOne Bot is active! 🚀"
 
 if __name__ == "__main__":
-    # This block is only used when you run 'python app.py' locally.
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
