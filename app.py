@@ -2,38 +2,34 @@ from flask import Flask
 import threading
 import os
 import time
-import sys
 from bot import AllinOneBot
 
 app = Flask(__name__)
 
 def run_irc():
-    # Attempting Port 6667 first as it is often more stable for bots
+    # HybridIRC Server Settings
     IRC_SERVER = "irc.hybridirc.com"
-    IRC_PORT = 6667 
-    IRC_NICK = f"AIO_Ant_{int(time.time()) % 1000}"
+    IRC_PORT = 6697  # Back to SSL
+    IRC_NICK = f"AIOBot_{int(time.time()) % 1000}"
     
-    print("[*] IRC Thread starting. Waiting 3s...", flush=True)
-    time.sleep(3)
+    print("[*] IRC Thread starting...", flush=True)
     
     while True:
         try:
-            print(f"[*] Attempting connection to {IRC_SERVER}:{IRC_PORT}...", flush=True)
+            print(f"[*] Connecting to {IRC_SERVER}:{IRC_PORT}...", flush=True)
             bot = AllinOneBot(IRC_NICK, IRC_SERVER, IRC_PORT)
             bot.start()
         except Exception as e:
-            print(f"[CRASH] Bot loop exited: {e}", flush=True)
-            print("[*] Restarting in 15 seconds...", flush=True)
-            time.sleep(15)
+            print(f"[CRASH] {e}", flush=True)
+            time.sleep(20)
 
-# Start the bot thread immediately
-print("[*] Main script starting. Launching thread...", flush=True)
+# Launch thread
 t = threading.Thread(target=run_irc, daemon=True)
 t.start()
 
 @app.route('/')
 def home():
-    return "Bot is alive! 🚀"
+    return "AllinOne Bot is running! 🚀"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
