@@ -5,72 +5,47 @@ import time
 import requests
 import urllib.parse
 import storage
+import sys
 
 class AllinOneBot(irc.bot.SingleServerIRCBot):
     def __init__(self, nickname, server, port):
-        print(f"[*] STARTING BOT: {nickname} on {server}:{port}")
+        print(f"[*] Initializing Bot Object for {server}:{port}...", flush=True)
         
-        # SSL Context setup
         if port == 6697:
-            print("[*] Creating SSL Context...")
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
-            # Force TLS 1.2+ for better compatibility
-            ctx.options |= ssl.OP_NO_SSLv2 | ssl.OP_NO_SSLv3
-            factory = irc.connection.Factory(wrapper=ctx.wrap_socket)
+            # Use a connection factory with a 20-second timeout
+            factory = irc.connection.Factory(wrapper=ctx.wrap_socket, timeout=20)
         else:
-            print("[*] Using Plain TCP Connection...")
-            factory = irc.connection.Factory()
+            factory = irc.connection.Factory(timeout=20)
 
-        # Initialize with a fixed username and realname (required by some servers)
         super().__init__([(server, port)], nickname, nickname, connect_factory=factory)
-        
         self.admin = "antonio"
-        self.cooldowns = {}
-        self.cd_time = 8
 
     def on_connect(self, c, e):
-        print("[*] Connection successful! Waiting for welcome...")
+        print("[*] TCP Connection established. Sending NICK/USER...", flush=True)
 
     def on_all_raw_messages(self, c, e):
-        # This will print EVERYTHING from the server to your Render logs
-        # If the server is rejecting you, you will see it here
-        print(f"[RAW SERVER] {e.arguments}")
+        # This will show us EXACTLY why the server is rejecting the bot
+        print(f"[RAW SERVER] {e.type}: {e.arguments}", flush=True)
 
     def on_welcome(self, c, e):
-        print(f"[SUCCESS] Joined {e.source}! Proceeding to channels...")
-        config = storage.get_config()
-        if "#chatwithworld" not in config["default_channels"]:
-            config["default_channels"].append("#chatwithworld")
-            
-        for channel in config["default_channels"]:
-            print(f"[*] Attempting JOIN: {channel}")
-            c.join(channel)
-
-    def on_join(self, c, e):
-        print(f"[+] Bot is now in {e.target}")
+        print(f"[SUCCESS] Welcome received from {e.source}!", flush=True)
+        c.join("#chatwithworld")
+        print("[*] Joined #chatwithworld", flush=True)
 
     def on_nicknameinuse(self, c, e):
         new_nick = c.get_nickname() + "_"
-        print(f"[!] Nick {c.get_nickname()} taken, trying {new_nick}")
+        print(f"[!] Nick taken, switching to {new_nick}", flush=True)
         c.nick(new_nick)
 
-    # --- COMMANDS ---
     def on_pubmsg(self, c, e):
         msg = e.arguments[0].strip()
-        author = e.source.nick
         target = e.target
-        parts = msg.split()
-        if not parts: return
-        cmd = parts[0].lower()
+        if msg.lower() == "!aiocmd":
+            c.privmsg(target, "🤖 AllinOne is alive! Commands: !gtime, !weather, !wiki, !topnews, !quote")
 
-        if cmd == "!aiocmd":
-            c.privmsg(target, "🛠️ !gtime, !topnews, !wiki, !weather, !btc, !eth, !quote, !advice, !catfact, !iss, !math, !urban 📜")
-
-        elif cmd == "!gtime":
-            loc = parts[1] if len(parts) > 1 else "London"
-            try:
-                res = requests.get(f"https://wttr.in/{urllib.parse.quote(loc)}?format=%T+%Z").text.strip()
-                c.privmsg(target, f"🕒 Time in {loc.upper()}: {res} 🌍")
-            except: pass
+    # Add error logging
+    def on_error(self, c, e):
+        print(f"[IRC ERROR] {e.arguments}", flush=True)
