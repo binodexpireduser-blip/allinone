@@ -1,36 +1,51 @@
-from flask import Flask
-import threading
 import os
+import threading
 import time
+
+from flask import Flask
+
 from bot import AllinOneBot
 
 app = Flask(__name__)
 
+# Shared reference so the /health route can inspect live connection state.
+_state = {"bot": None}
+
+
+@app.route("/")
+def home():
+    return "AllinOneBOT is running! \U0001f680"
+
+
+@app.route("/health")
+def health():
+    bot = _state.get("bot")
+    connected = bool(bot and bot.connection and bot.connection.is_connected())
+    status = {"irc_connected": connected}
+    return status, (200 if connected else 503)
+
+
 def run_irc():
-    # HybridIRC Server Settings
-    IRC_SERVER = "irc.hybridirc.com"
-    IRC_PORT = 6697  # Back to SSL
-    IRC_NICK = f"AIOBot_{int(time.time()) % 1000}"
-    
-    print("[*] IRC Thread starting...", flush=True)
-    
+    """
+    Outer restart loop: the irc library's ExponentialBackoff strategy (configured
+    in bot.py) already handles normal reconnects (dropped socket, server timeout,
+    etc.) without this loop ever needing to run more than once. This loop is a
+    safety net in case the whole bot object dies from an unexpected exception.
+    """
     while True:
         try:
-            print(f"[*] Connecting to {IRC_SERVER}:{IRC_PORT}...", flush=True)
-            bot = AllinOneBot(IRC_NICK, IRC_SERVER, IRC_PORT)
-            bot.start()
-        except Exception as e:
-            print(f"[CRASH] {e}", flush=True)
-            time.sleep(20)
+            bot = AllinOneBot()
+            _state["bot"] = bot
+            bot.start()  # blocks here; returns only if the bot truly gives up
+            print("[!] bot.start() returned unexpectedly \u2014 restarting in 15s...")
+        except Exception as ex:
+            print(f"[!] IRC bot crashed: {ex} \u2014 restarting in 15s...")
+        time.sleep(15)
 
-# Launch thread
-t = threading.Thread(target=run_irc, daemon=True)
-t.start()
-
-@app.route('/')
-def home():
-    return "AllinOne Bot is running! 🚀"
 
 if __name__ == "__main__":
+    irc_thread = threading.Thread(target=run_irc, daemon=True)
+    irc_thread.start()
+
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host="0.0.0.0", port=port)
