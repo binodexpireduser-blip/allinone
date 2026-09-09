@@ -1,4 +1,4 @@
+irc>=20.3.0
 flask
-irc
 requests
-gunicorn
+ 
